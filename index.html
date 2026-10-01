@@ -68,8 +68,9 @@ input,select,textarea{width:100%;background:#081727;color:var(--text);border:1px
 const SUPABASE_URL="https://oahqbsatculqbcqbfugr.supabase.co";
 const SUPABASE_KEY="sb_publishable_GjqncEfbcAUVcPhcDbH4pw_bgLltFRc";
 const SITE_URL="https://innovacionesservicio23-code.github.io/bitacora-imagenologia/";
+const RECOVERY_URL=SITE_URL+"?reset=1";
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-let session=null,cases=[],channel=null;
+let session=null,cases=[],channel=null,recoveryMode=false;
 const $=id=>document.getElementById(id), show=(x,b=true)=>x.classList.toggle("hidden",!b);
 function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
 function fmt(v){return v?new Date(v).toLocaleString("es-MX",{dateStyle:"medium",timeStyle:"short"}):""}
@@ -79,8 +80,7 @@ function tab(t){show($("loginForm"),t==="login");show($("registerForm"),t==="reg
 $("loginTab").onclick=()=>tab("login");$("registerTab").onclick=()=>tab("register");$("forgotBtn").onclick=()=>{$("forgotEmail").value=$("loginEmail").value;tab("forgot")};$("backBtn").onclick=()=>tab("login");
 $("loginForm").onsubmit=async e=>{e.preventDefault();const {error}=await sb.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});if(error)msg("No se pudo ingresar: "+error.message,true)};
 $("registerForm").onsubmit=async e=>{e.preventDefault();const {data,error}=await sb.auth.signUp({email:$("regEmail").value.trim(),password:$("regPassword").value,options:{emailRedirectTo:SITE_URL,data:{full_name:$("regName").value.trim()}}});if(error)msg("No se pudo crear la cuenta: "+error.message,true);else msg(data.session?"Cuenta creada.":"Cuenta creada. Revisa tu correo para confirmar.")};
-$("forgotForm").onsubmit=async e=>{e.preventDefault();const {error}=await sb.auth.resetPasswordForEmail($("forgotEmail").value.trim(),{redirectTo:SITE_URL});if(error)msg("No se pudo enviar el enlace: "+error.message,true);else msg("Si la cuenta puede recibir correo, recibirás un enlace para cambiar la contraseña.")};
-$("recoveryForm").onsubmit=async e=>{e.preventDefault();if($("newPass").value!==$("newPass2").value)return msg("Las contraseñas no coinciden.",true);const {error}=await sb.auth.updateUser({password:$("newPass").value});if(error)msg("No se pudo cambiar: "+error.message,true);else{msg("Contraseña actualizada.");setTimeout(()=>location.href=SITE_URL,1000)}};
+$("forgotForm").onsubmit=async e=>{e.preventDefault();const {error}=await sb.auth.resetPasswordForEmail($("forgotEmail").value.trim(),{redirectTo:RECOVERY_URL});if(error)msg("No se pudo enviar el enlace: "+error.message,true);else msg("Si la cuenta puede recibir correo, recibirás un enlace para cambiar la contraseña.")};
 $("logout").onclick=async()=>{await sb.auth.signOut({scope:"local"});location.reload()};
 
 async function profile(){const u=session.user;const {data}=await sb.from("profiles").select("full_name").eq("id",u.id).maybeSingle();const n=data?.full_name||u.user_metadata?.full_name||u.email;$("userName").textContent=n+" · "+u.email;$("avatar").textContent=(n[0]||"I").toUpperCase()}
@@ -94,7 +94,34 @@ window.detail=async id=>{const c=cases.find(x=>x.id===id);if(!c)return;const [{d
 $("closeDetail").onclick=()=>show($("detailModal"),false);
 ["search","siteFilter","modFilter","statusFilter","sort"].forEach(id=>$(id).addEventListener("input",render));
 async function realtime(){if(channel)await sb.removeChannel(channel);channel=sb.channel("bitacora-live").on("postgres_changes",{event:"*",schema:"public",table:"cases"},load).subscribe()}
-async function start(){const {data}=await sb.auth.getSession();session=data.session;if(location.hash.includes("type=recovery"))tab("recovery");else if(session){show($("authView"),false);show($("appView"));await profile();await load();await realtime()}else tab("login")}
-sb.auth.onAuthStateChange(async(e,s)=>{session=s;if(e==="PASSWORD_RECOVERY"){tab("recovery");return}if(s){show($("authView"),false);show($("appView"));await profile();await load();await realtime()}else{show($("authView"));show($("appView"),false)}});start();
+function enterRecovery(){
+  recoveryMode=true;
+  show($("authView"));
+  show($("appView"),false);
+  show($("tabs"),false);
+  show($("loginForm"),false);
+  show($("registerForm"),false);
+  show($("forgotForm"),false);
+  show($("recoveryForm"));
+  msg("Estás en modo de recuperación. Define una nueva contraseña para continuar.");
+}
+$("recoveryForm").onsubmit=async e=>{e.preventDefault();if($("newPass").value!==$("newPass2").value)return msg("Las contraseñas no coinciden.",true);const {error}=await sb.auth.updateUser({password:$("newPass").value});if(error)return msg("No se pudo cambiar: "+error.message,true);msg("Contraseña actualizada correctamente. Cerrando la sesión de recuperación...");recoveryMode=false;await sb.auth.signOut({scope:"local"});setTimeout(()=>location.replace(SITE_URL),900)};
+
+async function start(){
+  const params=new URLSearchParams(location.search);
+  const recoveryByUrl=params.get("reset")==="1" || location.hash.includes("type=recovery");
+  if(recoveryByUrl){enterRecovery();return}
+  const {data}=await sb.auth.getSession();
+  session=data.session;
+  if(recoveryMode)return;
+  if(session){show($("authView"),false);show($("appView"));await profile();await load();await realtime()}else tab("login")
+}
+sb.auth.onAuthStateChange(async(e,s)=>{
+  session=s;
+  if(e==="PASSWORD_RECOVERY"){enterRecovery();return}
+  if(recoveryMode)return;
+  if(s){show($("authView"),false);show($("appView"));await profile();await load();await realtime()}else{show($("authView"));show($("appView"),false)}
+});
+start();
 </script>
 </body></html>
